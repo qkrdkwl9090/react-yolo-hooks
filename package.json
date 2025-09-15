@@ -1,0 +1,100 @@
+{
+  "name": "react-yolo-hooks",
+  "version": "1.0.0",
+  "description": "Modern React hooks for YOLO11 object detection, segmentation, and pose estimation with ONNX Runtime Web",
+  "main": "./dist/index.cjs.js",
+  "module": "./dist/index.esm.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
+      "default": "./dist/index.esm.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "pnpm clean && pnpm build:types && pnpm build:lib",
+    "build:types": "tsc --project tsconfig.build.json --emitDeclarationOnly --outDir dist/types",
+    "build:lib": "vite build",
+    "clean": "rimraf dist",
+    "lint": "eslint src --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "preview": "vite preview",
+    "build:examples": "pnpm build:example:basic && pnpm build:example:camera && pnpm build:example:advanced",
+    "build:example:basic": "cd examples/basic && pnpm build",
+    "build:example:camera": "cd examples/camera && pnpm build",
+    "build:example:advanced": "cd examples/advanced && pnpm build",
+    "preview:examples": "pnpm preview:example:camera",
+    "preview:example:camera": "cd examples/camera && pnpm preview",
+    "prepublishOnly": "pnpm build && pnpm test"
+  },
+  "keywords": [
+    "react",
+    "hooks",
+    "yolo",
+    "yolo11",
+    "object-detection",
+    "segmentation",
+    "pose-estimation",
+    "onnx",
+    "onnx-runtime",
+    "webgpu",
+    "computer-vision",
+    "machine-learning",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qkrdkwl9090/react-yolo-hooks.git"
+  },
+  "bugs": {
+    "url": "https://github.com/qkrdkwl9090/react-yolo-hooks/issues"
+  },
+  "homepage": "https://github.com/qkrdkwl9090/react-yolo-hooks#readme",
+  "peerDependencies": {
+    "react": ">=16.8.0"
+  },
+  "dependencies": {
+    "onnxruntime-web": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@typescript-eslint/eslint-plugin": "^7.2.0",
+    "@typescript-eslint/parser": "^7.2.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "@vitest/ui": "^1.4.0",
+    "@testing-library/react": "^14.2.0",
+    "@testing-library/jest-dom": "^6.4.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.6",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "vitest": "^1.4.0",
+    "jsdom": "^24.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "publishConfig": {
+    "access": "public"
+  }
+}
