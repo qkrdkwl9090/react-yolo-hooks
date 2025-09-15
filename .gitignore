@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production builds
+dist/
+lib/
+es/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Coverage
+coverage/
+*.lcov
+.nyc_output
+
+# Cache directories
+.cache/
+.parcel-cache/
+.npm/
+.yarn/
+.eslintcache
+.tsbuildinfo
+
+# Package managers
+*.tgz
+.yarn-integrity
+.pnpm-store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Examples build
+examples/*/dist/
+examples/*/node_modules/
