@@ -30,7 +30,7 @@ export interface Keypoint {
 }
 
 export interface YoloConfig {
-  modelType?: 'detection' | 'segmentation' | 'pose' | 'all'
+  modelType?: 'detection' | 'segmentation' | 'pose'
   modelUrl?: string
   confidenceThreshold?: number
   iouThreshold?: number

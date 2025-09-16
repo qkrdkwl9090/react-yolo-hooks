@@ -12,7 +12,6 @@ export type {
   YoloConfig,
   YoloState,
   InferenceResult,
-  UseYoloReturn,
   YoloProvider,
   ProviderConfig,
   ProcessedImageData
@@ -49,8 +48,20 @@ export {
   DEFAULT_CONFIG
 } from './constants/models'
 
-// Export hooks (will be implemented next)
-// export { useYolo } from './hooks/useYolo'
-// export { useYoloDetection } from './hooks/useYoloDetection'
-// export { useYoloSegmentation } from './hooks/useYoloSegmentation'
-// export { useYoloPose } from './hooks/useYoloPose'
+// Export hooks
+export {
+  useYolo,
+  useYoloDetection,
+  useYoloSegmentation,
+  useYoloPose
+} from './hooks'
+
+export type {
+  UseYoloReturn,
+  UseYoloDetectionConfig,
+  UseYoloDetectionReturn,
+  UseYoloSegmentationConfig,
+  UseYoloSegmentationReturn,
+  UseYoloPoseConfig,
+  UseYoloPoseReturn
+} from './hooks'
