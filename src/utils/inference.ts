@@ -53,30 +53,23 @@ export function configureProviders(provider: YoloProvider): ProviderConfig[] {
  */
 export async function createInferenceSession(
   modelPath: string,
-  provider: YoloProvider = 'webgpu',
+  _provider: YoloProvider = 'wasm',
   onProgress?: (progress: number) => void
 ): Promise<InferenceSession> {
   try {
-    // Configure providers
-    const providers = configureProviders(provider)
-    
-    // Set execution providers
-    const providerNames = providers.map(config => {
-      if (config.provider === 'webgpu') return 'webgpu'
-      return 'wasm'
-    })
-    
-    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/'
-    
+    // Configure ONNX Runtime to match working project
+    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/'
+    ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4
+
     const sessionOptions: ort.InferenceSession.SessionOptions = {
-      executionProviders: providerNames,
+      executionProviders: ['wasm'],
       graphOptimizationLevel: 'all',
       executionMode: 'parallel'
     }
 
     // Load model with progress tracking
     const session = await ort.InferenceSession.create(modelPath, sessionOptions)
-    
+
     if (onProgress) {
       onProgress(100)
     }

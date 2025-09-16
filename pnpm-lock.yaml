@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       onnxruntime-web:
-        specifier: ^1.17.0
+        specifier: ^1.22.0
         version: 1.22.0
     devDependencies:
       '@testing-library/jest-dom':
