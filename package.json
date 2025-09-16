@@ -20,22 +20,15 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "vite",
     "build": "pnpm clean && pnpm build:types && pnpm build:lib",
     "build:types": "tsc --project tsconfig.build.json --emitDeclarationOnly --outDir dist/types",
     "build:lib": "vite build",
     "clean": "rimraf dist",
     "lint": "eslint src --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0",
     "type-check": "tsc --noEmit",
-    "test": "vitest",
+    "test": "vitest run",
     "test:ui": "vitest --ui",
-    "preview": "vite preview",
-    "build:examples": "pnpm build:example:basic && pnpm build:example:camera && pnpm build:example:advanced",
-    "build:example:basic": "cd examples/basic && pnpm build",
-    "build:example:camera": "cd examples/camera && pnpm build",
-    "build:example:advanced": "cd examples/advanced && pnpm build",
-    "preview:examples": "pnpm preview:example:camera",
-    "preview:example:camera": "cd examples/camera && pnpm preview",
+    "test:watch": "vitest",
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "keywords": [
@@ -80,8 +73,6 @@
     "@testing-library/react": "^14.2.0",
     "@testing-library/jest-dom": "^6.4.0",
     "eslint": "^8.57.0",
-    "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-react-refresh": "^0.4.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "rimraf": "^5.0.5",
