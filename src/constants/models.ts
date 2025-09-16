@@ -25,7 +25,7 @@ export const POSE_KEYPOINTS = [
 export const DEFAULT_MODELS: Record<string, YoloModel> = {
   detection: {
     name: 'YOLO11n',
-    url: 'https://github.com/ultralytics/assets/releases/download/v8.2.0/yolo11n.onnx',
+    url: '/models/yolo11n.onnx',
     inputShape: [1, 3, 640, 640],
     outputShape: [1, 84, 8400],
     classes: COCO_CLASSES,
@@ -33,7 +33,7 @@ export const DEFAULT_MODELS: Record<string, YoloModel> = {
   },
   segmentation: {
     name: 'YOLO11n-seg',
-    url: 'https://github.com/ultralytics/assets/releases/download/v8.2.0/yolo11n-seg.onnx',
+    url: '/models/yolo11n-seg.onnx',
     inputShape: [1, 3, 640, 640],
     outputShape: [1, 116, 8400],
     classes: COCO_CLASSES,
@@ -41,7 +41,7 @@ export const DEFAULT_MODELS: Record<string, YoloModel> = {
   },
   pose: {
     name: 'YOLO11n-pose',
-    url: 'https://github.com/ultralytics/assets/releases/download/v8.2.0/yolo11n-pose.onnx',
+    url: '/models/yolo11n-pose.onnx',
     inputShape: [1, 3, 640, 640],
     outputShape: [1, 56, 8400],
     classes: ['person'],
@@ -53,7 +53,7 @@ export const DEFAULT_CONFIG = {
   confidenceThreshold: 0.5,
   iouThreshold: 0.4,
   maxDetections: 100,
-  provider: 'webgpu' as const,
+  provider: 'wasm' as const,
   numThreads: 4,
   enableDebug: false
 }
