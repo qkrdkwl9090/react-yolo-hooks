@@ -11,6 +11,7 @@ export interface UseYoloSegmentationReturn {
   isModelReady: boolean
   error: Error | null
   downloadProgress: number
+  predict: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<InferenceResult>
   segment: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<Segmentation[]>
   reset: () => void
 }
@@ -42,6 +43,7 @@ export function useYoloSegmentation(config: UseYoloSegmentationConfig = {}): Use
 
   return {
     ...yoloState,
+    predict,
     segment
   }
 }

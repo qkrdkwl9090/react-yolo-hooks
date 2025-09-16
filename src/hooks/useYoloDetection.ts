@@ -11,6 +11,7 @@ export interface UseYoloDetectionReturn {
   isModelReady: boolean
   error: Error | null
   downloadProgress: number
+  predict: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<InferenceResult>
   detect: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<Detection[]>
   reset: () => void
 }
@@ -42,6 +43,7 @@ export function useYoloDetection(config: UseYoloDetectionConfig = {}): UseYoloDe
 
   return {
     ...yoloState,
+    predict,
     detect
   }
 }
