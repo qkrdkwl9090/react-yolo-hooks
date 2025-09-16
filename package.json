@@ -20,7 +20,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "pnpm clean && pnpm build:types && pnpm build:lib",
+    "build": "pnpm clean && pnpm build:lib && pnpm build:types",
     "build:types": "tsc --project tsconfig.build.json --emitDeclarationOnly --outDir dist/types",
     "build:lib": "vite build",
     "clean": "rimraf dist",
