@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
-import type { YoloConfig, Detection, InferenceResult } from '@/types'
+import { useMemo, useCallback } from 'react'
+import type { YoloConfig, Detection, InferenceResult, DrawingOptions } from '@/types'
 import { useYolo } from './useYolo'
+import { drawDetections, clearCanvas } from '@/utils/drawing'
 
 export interface UseYoloDetectionConfig extends Omit<YoloConfig, 'modelType'> {
   // Detection-specific configurations can be added here
@@ -13,6 +14,8 @@ export interface UseYoloDetectionReturn {
   downloadProgress: number
   predict: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<InferenceResult>
   detect: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<Detection[]>
+  drawDetections: (canvas: HTMLCanvasElement, detections: Detection[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => void
+  clearCanvas: (canvas: HTMLCanvasElement) => void
   reset: () => void
 }
 
@@ -41,9 +44,24 @@ export function useYoloDetection(config: UseYoloDetectionConfig = {}): UseYoloDe
       return result.detections
     }, [predict])
 
+  // Drawing utilities
+  const drawDetectionsCallback = useCallback(
+    (canvas: HTMLCanvasElement, detections: Detection[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => {
+      drawDetections(canvas, detections, sourceWidth, sourceHeight, options)
+    }, []
+  )
+
+  const clearCanvasCallback = useCallback(
+    (canvas: HTMLCanvasElement) => {
+      clearCanvas(canvas)
+    }, []
+  )
+
   return {
     ...yoloState,
     predict,
-    detect
+    detect,
+    drawDetections: drawDetectionsCallback,
+    clearCanvas: clearCanvasCallback
   }
 }

@@ -69,6 +69,15 @@ export interface InferenceResult {
   postprocessTime: number
 }
 
+export interface DrawingOptions {
+  showLabels?: boolean
+  showConfidence?: boolean
+  lineWidth?: number
+  fontSize?: string
+  fontFamily?: string
+  colors?: string[]
+}
+
 export interface UseYoloReturn extends YoloState {
   predict: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<InferenceResult>
   reset: () => void

@@ -6,11 +6,16 @@ import type {
   Detection,
   Segmentation,
   Pose,
-  Keypoint,
   ProcessedImageData
 } from '@/types'
-import { scaleCoordinates } from './image'
-import { COCO_CLASSES, POSE_KEYPOINTS } from '@/constants/models'
+import {
+  COCO_CLASSES,
+  POSE_KEYPOINTS,
+  MODEL_WIDTH,
+  MODEL_HEIGHT,
+  NUM_DETECTIONS,
+  NUM_CLASSES
+} from '@/constants/models'
 
 export interface PostProcessOptions {
   confidenceThreshold: number
@@ -18,6 +23,35 @@ export interface PostProcessOptions {
   maxDetections: number
   inputShape: number[]
   modelType: 'detection' | 'segmentation' | 'pose'
+}
+
+/**
+ * Convert model coordinates to original image coordinates
+ */
+function convertToImageCoordinates(
+  xCenter: number,
+  yCenter: number,
+  width: number,
+  height: number,
+  originalWidth: number,
+  originalHeight: number
+): [number, number, number, number] {
+  // Convert center coordinates to corner coordinates
+  const x1 = xCenter - width / 2
+  const y1 = yCenter - height / 2
+  const x2 = xCenter + width / 2
+  const y2 = yCenter + height / 2
+
+  // Scale from model coordinates to original image coordinates
+  const scaledX1 = Math.max(0, (x1 / MODEL_WIDTH) * originalWidth)
+  const scaledY1 = Math.max(0, (y1 / MODEL_HEIGHT) * originalHeight)
+  const scaledX2 = Math.min(originalWidth, (x2 / MODEL_WIDTH) * originalWidth)
+  const scaledY2 = Math.min(originalHeight, (y2 / MODEL_HEIGHT) * originalHeight)
+
+  const boxWidth = scaledX2 - scaledX1
+  const boxHeight = scaledY2 - scaledY1
+
+  return [scaledX1, scaledY1, boxWidth, boxHeight]
 }
 
 /**
@@ -111,46 +145,53 @@ export function processDetections(
   options: PostProcessOptions
 ): Detection[] {
   const { confidenceThreshold, iouThreshold, maxDetections } = options
-  const channels = 84
-  const numDetections = output.length / 84
+
+  // YOLO11 output format: [84, 8400] -> transposed to [8400, 84]
 
   const detections: Detection[] = []
   const boxes: number[][] = []
   const scores: number[] = []
   const classIds: number[] = []
 
-  // Parse outputs (format: [x_center, y_center, width, height, confidence, class_scores...])
-  for (let i = 0; i < numDetections; i++) {
-    const offset = i * channels
+  // Parse outputs using channel-separated layout (like working project)
+  for (let i = 0; i < NUM_DETECTIONS; i++) {
+    // Extract coordinates (normalized 0-640)
+    const xCenter = output[0 * NUM_DETECTIONS + i] ?? 0
+    const yCenter = output[1 * NUM_DETECTIONS + i] ?? 0
+    const width = output[2 * NUM_DETECTIONS + i] ?? 0
+    const height = output[3 * NUM_DETECTIONS + i] ?? 0
 
-    // Extract box coordinates
-    const xCenter = output[offset] ?? 0
-    const yCenter = output[offset + 1] ?? 0
-    const width = output[offset + 2] ?? 0
-    const height = output[offset + 3] ?? 0
-
-    // Find best class
+    // Find best class (classes start at index 4)
     let maxScore = 0
     let bestClassId = 0
 
-    for (let j = 4; j < channels; j++) {
-      const classScore = output[offset + j] ?? 0
+    for (let j = 0; j < NUM_CLASSES; j++) {
+      const classScore = output[(4 + j) * NUM_DETECTIONS + i] ?? 0
       if (classScore > maxScore) {
         maxScore = classScore
-        bestClassId = j - 4
+        bestClassId = j
       }
     }
 
-    // Filter by confidence
+    // Filter by confidence threshold
     if (maxScore < confidenceThreshold) {
       continue
     }
 
-    // Convert to corner coordinates
-    const x = xCenter - width / 2
-    const y = yCenter - height / 2
+    // Skip invalid boxes
+    if (width <= 0 || height <= 0) continue
 
-    boxes.push([x, y, width, height])
+
+    // Convert to original image coordinates
+    const { originalWidth, originalHeight } = processedImageData
+    const [scaledX1, scaledY1, boxWidth, boxHeight] = convertToImageCoordinates(
+      xCenter, yCenter, width, height, originalWidth, originalHeight
+    )
+
+    // Skip boxes that are too small
+    if (boxWidth < 20 || boxHeight < 20) continue
+
+    boxes.push([scaledX1, scaledY1, boxWidth, boxHeight])
     scores.push(maxScore)
     classIds.push(bestClassId)
   }
@@ -158,7 +199,7 @@ export function processDetections(
   // Apply NMS
   const selectedIndices = nms(boxes, scores, iouThreshold)
 
-  // Create final detections
+  // Create final detections (coordinates are already scaled to original image)
   for (const index of selectedIndices.slice(0, maxDetections)) {
     const box = boxes[index]
     const score = scores[index]
@@ -166,19 +207,10 @@ export function processDetections(
 
     if (!box || score === undefined || classId === undefined) continue
 
-    // Scale coordinates back to original image
-    const [scaledX, scaledY, scaledWidth, scaledHeight] = scaleCoordinates(
-      box?.[0] ?? 0,
-      box?.[1] ?? 0,
-      box?.[2] ?? 0,
-      box?.[3] ?? 0,
-      processedImageData
-    )
-
     const className = COCO_CLASSES[classId] ?? 'unknown'
 
     detections.push({
-      bbox: [scaledX, scaledY, scaledWidth, scaledHeight],
+      bbox: [box[0], box[1], box[2], box[3]] as [number, number, number, number],
       score,
       class: className,
       classIndex: classId
@@ -193,45 +225,141 @@ export function processDetections(
  */
 export function processSegmentations(
   output: Float32Array,
-  maskOutput: Float32Array,
+  _maskOutput: Float32Array,
   processedImageData: ProcessedImageData,
   options: PostProcessOptions
 ): Segmentation[] {
-  // First get detections
-  const detections = processDetections(output, processedImageData, options)
+  const { confidenceThreshold, iouThreshold, maxDetections } = options
+  const { originalWidth, originalHeight } = processedImageData
+
+  // YOLO11-seg output format: [116, 8400] where first 84 are detection data and remaining 32 are mask coefficients
+  const NUM_DETECTIONS = 8400
+  const NUM_CLASSES = 80
+  const numMaskCoeffs = 32
+
+  const detections: Array<{
+    bbox: [number, number, number, number]
+    score: number
+    class: string
+    classIndex: number
+    maskCoeffs: number[]
+  }> = []
+
+  const boxes: number[][] = []
+  const scores: number[] = []
+  const classIds: number[] = []
+
+  // Parse detection outputs (same as detection but with mask coefficients)
+  for (let i = 0; i < NUM_DETECTIONS; i++) {
+    // Extract coordinates (normalized 0-640)
+    const xCenter = output[0 * NUM_DETECTIONS + i] ?? 0
+    const yCenter = output[1 * NUM_DETECTIONS + i] ?? 0
+    const width = output[2 * NUM_DETECTIONS + i] ?? 0
+    const height = output[3 * NUM_DETECTIONS + i] ?? 0
+
+    // Find best class (classes start at index 4)
+    let maxScore = 0
+    let bestClassId = 0
+
+    for (let j = 0; j < NUM_CLASSES; j++) {
+      const classScore = output[(4 + j) * NUM_DETECTIONS + i] ?? 0
+      if (classScore > maxScore) {
+        maxScore = classScore
+        bestClassId = j
+      }
+    }
+
+    // Filter by confidence threshold
+    if (maxScore < confidenceThreshold) continue
+    if (width <= 0 || height <= 0) continue
+
+    // Extract mask coefficients (starting from index 84)
+    const maskCoeffs: number[] = []
+    for (let j = 0; j < numMaskCoeffs; j++) {
+      maskCoeffs.push(output[(84 + j) * NUM_DETECTIONS + i] ?? 0)
+    }
+
+    // Convert center coordinates to corner coordinates
+    const x1 = xCenter - width / 2
+    const y1 = yCenter - height / 2
+    const x2 = xCenter + width / 2
+    const y2 = yCenter + height / 2
+
+    // Scale from model coordinates (640x640) to original image coordinates
+    const modelWidth = MODEL_WIDTH
+    const modelHeight = MODEL_HEIGHT
+
+    const scaledX1 = Math.max(0, (x1 / modelWidth) * originalWidth)
+    const scaledY1 = Math.max(0, (y1 / modelHeight) * originalHeight)
+    const scaledX2 = Math.min(originalWidth, (x2 / modelWidth) * originalWidth)
+    const scaledY2 = Math.min(originalHeight, (y2 / modelHeight) * originalHeight)
+
+    // Skip boxes that are too small
+    const boxWidth = scaledX2 - scaledX1
+    const boxHeight = scaledY2 - scaledY1
+    if (boxWidth < 20 || boxHeight < 20) continue
+
+    const className = COCO_CLASSES[bestClassId] ?? 'unknown'
+
+    boxes.push([scaledX1, scaledY1, boxWidth, boxHeight])
+    scores.push(maxScore)
+    classIds.push(bestClassId)
+    detections.push({
+      bbox: [scaledX1, scaledY1, boxWidth, boxHeight] as [number, number, number, number],
+      score: maxScore,
+      class: className,
+      classIndex: bestClassId,
+      maskCoeffs
+    })
+  }
+
+  // Apply NMS
+  const selectedIndices = nms(boxes, scores, iouThreshold)
 
   const segmentations: Segmentation[] = []
 
-  // Process masks for each detection
-  detections.forEach((detection) => {
-    // Extract mask for this detection (simplified)
-    const maskData = new Uint8ClampedArray(
-      processedImageData.originalWidth * processedImageData.originalHeight * 4
-    )
+  // Process masks for selected detections
+  for (const index of selectedIndices.slice(0, maxDetections)) {
+    const detection = detections[index]
+    if (!detection) continue
 
-    // This is a simplified mask extraction - in reality, you'd need to
-    // properly decode the mask prototypes and coefficients
-    for (let i = 0; i < maskData.length; i += 4) {
-      const maskValue = maskOutput[Math.floor(i / 4)] ?? 0
-      const alpha = maskValue > 0.5 ? 128 : 0
+    // Create a simple mask for now (this would need proper mask prototype processing in real implementation)
+    const maskWidth = originalWidth
+    const maskHeight = originalHeight
+    const maskData = new Uint8ClampedArray(maskWidth * maskHeight * 4)
 
-      maskData[i] = 255     // R
-      maskData[i + 1] = 0   // G
-      maskData[i + 2] = 0   // B
-      maskData[i + 3] = alpha // A
+    // Fill with a simple pattern based on bounding box (placeholder)
+    const [x, y, width, height] = detection.bbox
+    for (let row = 0; row < maskHeight; row++) {
+      for (let col = 0; col < maskWidth; col++) {
+        const idx = (row * maskWidth + col) * 4
+
+        // Simple rectangular mask within bbox
+        if (col >= x && col < x + width && row >= y && row < y + height) {
+          maskData[idx] = 255     // R
+          maskData[idx + 1] = 0   // G
+          maskData[idx + 2] = 0   // B
+          maskData[idx + 3] = 128 // A (semi-transparent)
+        } else {
+          maskData[idx] = 0       // R
+          maskData[idx + 1] = 0   // G
+          maskData[idx + 2] = 0   // B
+          maskData[idx + 3] = 0   // A (transparent)
+        }
+      }
     }
 
-    const mask = new ImageData(
-      maskData,
-      processedImageData.originalWidth,
-      processedImageData.originalHeight
-    )
+    const mask = new ImageData(maskData, maskWidth, maskHeight)
 
     segmentations.push({
-      ...detection,
+      bbox: detection.bbox,
+      score: detection.score,
+      class: detection.class,
+      classIndex: detection.classIndex,
       mask
     })
-  })
+  }
+
 
   return segmentations
 }
@@ -245,89 +373,100 @@ export function processPoses(
   options: PostProcessOptions
 ): Pose[] {
   const { confidenceThreshold, iouThreshold, maxDetections } = options
-  const channels = 56
-  const numDetections = output.length / 56
+  const { originalWidth, originalHeight } = processedImageData
 
-  const poses: Pose[] = []
+  // YOLO11-pose format: [56, 8400] -> channel-separated layout
+  const NUM_DETECTIONS = 8400
+  const candidatePoses: Array<{
+    bbox: [number, number, number, number]
+    score: number
+    keypoints: Array<{x: number, y: number, confidence: number, name: string}>
+  }> = []
+
   const boxes: number[][] = []
   const scores: number[] = []
 
-  // Parse outputs (format: [x_center, y_center, width, height, keypoints...])
-  for (let i = 0; i < numDetections; i++) {
-    const offset = i * channels
+  // Parse outputs using channel-separated layout (like working project)
+  for (let i = 0; i < NUM_DETECTIONS; i++) {
+    // Extract coordinates (normalized 0-640)
+    const xCenter = output[0 * NUM_DETECTIONS + i] ?? 0
+    const yCenter = output[1 * NUM_DETECTIONS + i] ?? 0
+    const width = output[2 * NUM_DETECTIONS + i] ?? 0
+    const height = output[3 * NUM_DETECTIONS + i] ?? 0
+    const personConf = output[4 * NUM_DETECTIONS + i] ?? 0
 
-    // Extract box coordinates
-    const xCenter = output[offset] ?? 0
-    const yCenter = output[offset + 1] ?? 0
-    const width = output[offset + 2] ?? 0
-    const height = output[offset + 3] ?? 0
-    const confidence = output[offset + 4] ?? 0
+    // Filter by confidence threshold
+    if (personConf < confidenceThreshold) continue
+    if (width <= 0 || height <= 0) continue
 
-    // Filter by confidence
-    if (confidence < confidenceThreshold) {
-      continue
-    }
+    // Extract 17 keypoints (starting from index 5)
+    const keypoints = []
+    for (let j = 0; j < 17; j++) {
+      const keypointX = output[(5 + j * 3) * NUM_DETECTIONS + i] ?? 0
+      const keypointY = output[(5 + j * 3 + 1) * NUM_DETECTIONS + i] ?? 0
+      const keypointConf = output[(5 + j * 3 + 2) * NUM_DETECTIONS + i] ?? 0
 
-    // Convert to corner coordinates
-    const x = xCenter - width / 2
-    const y = yCenter - height / 2
+      // Convert keypoints from model coordinates to original image coordinates
+      // Account for letterbox padding
+      const { scaleX, scaleY, padX, padY } = processedImageData
 
-    boxes.push([x, y, width, height])
-    scores.push(confidence)
-  }
-
-  // Apply NMS
-  const selectedIndices = nms(boxes, scores, iouThreshold)
-
-  // Create final poses
-  for (const index of selectedIndices.slice(0, maxDetections)) {
-    const box = boxes[index]
-    const score = scores[index]
-
-    if (!box || score === undefined) continue
-
-    const offset = index * channels
-
-    // Extract keypoints (starts from index 5, 3 values per keypoint: x, y, confidence)
-    const keypoints: Keypoint[] = []
-
-    for (let j = 0; j < 17; j++) { // 17 keypoints for human pose
-      const keypointOffset = offset + 5 + j * 3
-      const kx = output[keypointOffset] ?? 0
-      const ky = output[keypointOffset + 1] ?? 0
-      const kconf = output[keypointOffset + 2] ?? 0
-
-      // Scale keypoint coordinates
-      const [scaledKx, scaledKy] = scaleCoordinates(
-        kx, ky, 0, 0,
-        processedImageData
-      )
+      // Remove padding and scale back to original coordinates
+      const originalX = Math.max(0, (keypointX - padX) / scaleX)
+      const originalY = Math.max(0, (keypointY - padY) / scaleY)
 
       keypoints.push({
-        x: scaledKx,
-        y: scaledKy,
-        confidence: kconf,
+        x: originalX,
+        y: originalY,
+        confidence: keypointConf,
         name: POSE_KEYPOINTS[j] ?? `keypoint_${j}`
       })
     }
 
-    // Scale bounding box coordinates
-    const [scaledX, scaledY, scaledWidth, scaledHeight] = scaleCoordinates(
-      box?.[0] ?? 0,
-      box?.[1] ?? 0,
-      box?.[2] ?? 0,
-      box?.[3] ?? 0,
-      processedImageData
-    )
+    // Convert center coordinates to corner coordinates
+    const x1 = xCenter - width / 2
+    const y1 = yCenter - height / 2
+    const x2 = xCenter + width / 2
+    const y2 = yCenter + height / 2
 
-    poses.push({
-      bbox: [scaledX, scaledY, scaledWidth, scaledHeight],
-      score,
-      class: 'person',
-      classIndex: 0,
+    // Scale bbox to original image coordinates
+    const scaledX1 = Math.max(0, (x1 / 640) * originalWidth)
+    const scaledY1 = Math.max(0, (y1 / 640) * originalHeight)
+    const scaledX2 = Math.min(originalWidth, (x2 / 640) * originalWidth)
+    const scaledY2 = Math.min(originalHeight, (y2 / 640) * originalHeight)
+
+    // Skip boxes that are too small
+    const boxWidth = scaledX2 - scaledX1
+    const boxHeight = scaledY2 - scaledY1
+    if (boxWidth < 20 || boxHeight < 20) continue
+
+    // Store for NMS
+    boxes.push([scaledX1, scaledY1, boxWidth, boxHeight])
+    scores.push(personConf)
+    candidatePoses.push({
+      bbox: [scaledX1, scaledY1, boxWidth, boxHeight] as [number, number, number, number],
+      score: personConf,
       keypoints
     })
   }
+
+  // Apply NMS to remove overlapping poses
+  const selectedIndices = nms(boxes, scores, iouThreshold)
+
+  // Create final poses after NMS
+  const poses: Pose[] = []
+  for (const index of selectedIndices.slice(0, maxDetections)) {
+    const candidate = candidatePoses[index]
+    if (!candidate) continue
+
+    poses.push({
+      bbox: candidate.bbox,
+      score: candidate.score,
+      class: 'person',
+      classIndex: 0,
+      keypoints: candidate.keypoints
+    })
+  }
+
 
   return poses
 }

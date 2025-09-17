@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
-import type { YoloConfig, Pose, InferenceResult } from '@/types'
+import { useMemo, useCallback } from 'react'
+import type { YoloConfig, Pose, InferenceResult, DrawingOptions } from '@/types'
 import { useYolo } from './useYolo'
+import { drawPoses, clearCanvas } from '@/utils/drawing'
 
 export interface UseYoloPoseConfig extends Omit<YoloConfig, 'modelType'> {
   // Pose-specific configurations can be added here
@@ -13,6 +14,8 @@ export interface UseYoloPoseReturn {
   downloadProgress: number
   predict: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<InferenceResult>
   detectPoses: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<Pose[]>
+  drawPoses: (canvas: HTMLCanvasElement, poses: Pose[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => void
+  clearCanvas: (canvas: HTMLCanvasElement) => void
   reset: () => void
 }
 
@@ -41,9 +44,24 @@ export function useYoloPose(config: UseYoloPoseConfig = {}): UseYoloPoseReturn {
       return result.poses
     }, [predict])
 
+  // Drawing utilities
+  const drawPosesCallback = useCallback(
+    (canvas: HTMLCanvasElement, poses: Pose[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => {
+      drawPoses(canvas, poses, sourceWidth, sourceHeight, options)
+    }, []
+  )
+
+  const clearCanvasCallback = useCallback(
+    (canvas: HTMLCanvasElement) => {
+      clearCanvas(canvas)
+    }, []
+  )
+
   return {
     ...yoloState,
     predict,
-    detectPoses
+    detectPoses,
+    drawPoses: drawPosesCallback,
+    clearCanvas: clearCanvasCallback
   }
 }

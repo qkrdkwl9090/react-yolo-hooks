@@ -57,3 +57,23 @@ export const DEFAULT_CONFIG = {
   numThreads: 4,
   enableDebug: false
 }
+
+// YOLO model constants
+export const MODEL_WIDTH = 640
+export const MODEL_HEIGHT = 640
+export const NUM_DETECTIONS = 8400
+export const NUM_CLASSES = 80
+
+// Drawing constants
+export const DEFAULT_COLORS = [
+  '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+  '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+]
+
+// Pose skeleton connections (COCO format)
+export const POSE_SKELETON = [
+  [16, 14], [14, 12], [17, 15], [15, 13], [12, 13],
+  [6, 12], [7, 13], [6, 7], [6, 8], [7, 9],
+  [8, 10], [9, 11], [2, 3], [1, 2], [1, 3],
+  [2, 4], [3, 5], [4, 6], [5, 7]
+]

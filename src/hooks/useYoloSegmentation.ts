@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
-import type { YoloConfig, Segmentation, InferenceResult } from '@/types'
+import { useMemo, useCallback } from 'react'
+import type { YoloConfig, Segmentation, InferenceResult, DrawingOptions } from '@/types'
 import { useYolo } from './useYolo'
+import { drawSegmentations, clearCanvas } from '@/utils/drawing'
 
 export interface UseYoloSegmentationConfig extends Omit<YoloConfig, 'modelType'> {
   // Segmentation-specific configurations can be added here
@@ -13,6 +14,8 @@ export interface UseYoloSegmentationReturn {
   downloadProgress: number
   predict: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<InferenceResult>
   segment: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<Segmentation[]>
+  drawSegmentations: (canvas: HTMLCanvasElement, segmentations: Segmentation[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => void
+  clearCanvas: (canvas: HTMLCanvasElement) => void
   reset: () => void
 }
 
@@ -41,9 +44,24 @@ export function useYoloSegmentation(config: UseYoloSegmentationConfig = {}): Use
       return result.segmentations
     }, [predict])
 
+  // Drawing utilities
+  const drawSegmentationsCallback = useCallback(
+    (canvas: HTMLCanvasElement, segmentations: Segmentation[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => {
+      drawSegmentations(canvas, segmentations, sourceWidth, sourceHeight, options)
+    }, []
+  )
+
+  const clearCanvasCallback = useCallback(
+    (canvas: HTMLCanvasElement) => {
+      clearCanvas(canvas)
+    }, []
+  )
+
   return {
     ...yoloState,
     predict,
-    segment
+    segment,
+    drawSegmentations: drawSegmentationsCallback,
+    clearCanvas: clearCanvasCallback
   }
 }
