@@ -40,6 +40,15 @@ export {
   processPoses
 } from './utils/postprocess'
 
+export {
+  clearCanvas,
+  drawDetections,
+  drawPoses,
+  drawSegmentations,
+  createCanvasFromVideo,
+  resizeCanvas
+} from './utils/drawing'
+
 // Export constants
 export {
   COCO_CLASSES,
@@ -53,7 +62,8 @@ export {
   useYolo,
   useYoloDetection,
   useYoloSegmentation,
-  useYoloPose
+  useYoloPose,
+  useYoloContinuous
 } from './hooks'
 
 export type {
@@ -63,5 +73,7 @@ export type {
   UseYoloSegmentationConfig,
   UseYoloSegmentationReturn,
   UseYoloPoseConfig,
-  UseYoloPoseReturn
+  UseYoloPoseReturn,
+  UseYoloContinuousConfig,
+  UseYoloContinuousReturn
 } from './hooks'

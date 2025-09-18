@@ -13,14 +13,14 @@ export const COCO_CLASSES = [
   'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
   'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier',
   'toothbrush'
-]
+] as const
 
 export const POSE_KEYPOINTS = [
   'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
   'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
   'left_wrist', 'right_wrist', 'left_hip', 'right_hip',
   'left_knee', 'right_knee', 'left_ankle', 'right_ankle'
-]
+] as const
 
 export const DEFAULT_MODELS: Record<string, YoloModel> = {
   detection: {
@@ -52,10 +52,12 @@ export const DEFAULT_MODELS: Record<string, YoloModel> = {
 export const DEFAULT_CONFIG = {
   confidenceThreshold: 0.5,
   iouThreshold: 0.4,
-  maxDetections: 100,
-  provider: 'wasm' as const,
-  numThreads: 4,
-  enableDebug: false
+  maxDetections: 50, 
+  provider: 'webgpu' as const, 
+  numThreads: navigator.hardwareConcurrency || 4,
+  enableDebug: false,
+  maxFPS: 20, 
+  skipFrames: 0 
 }
 
 // YOLO model constants
@@ -68,7 +70,7 @@ export const NUM_CLASSES = 80
 export const DEFAULT_COLORS = [
   '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
   '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
-]
+] as const
 
 // Pose skeleton connections (COCO format)
 export const POSE_SKELETON = [
@@ -76,4 +78,4 @@ export const POSE_SKELETON = [
   [6, 12], [7, 13], [6, 7], [6, 8], [7, 9],
   [8, 10], [9, 11], [2, 3], [1, 2], [1, 3],
   [2, 4], [3, 5], [4, 6], [5, 7]
-]
+] as const satisfies ReadonlyArray<readonly [number, number]>

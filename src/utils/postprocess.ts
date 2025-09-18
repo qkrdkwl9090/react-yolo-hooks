@@ -11,8 +11,6 @@ import type {
 import {
   COCO_CLASSES,
   POSE_KEYPOINTS,
-  MODEL_WIDTH,
-  MODEL_HEIGHT,
   NUM_DETECTIONS,
   NUM_CLASSES
 } from '@/constants/models'
@@ -33,25 +31,29 @@ function convertToImageCoordinates(
   yCenter: number,
   width: number,
   height: number,
-  originalWidth: number,
-  originalHeight: number
+  processedImageData: ProcessedImageData
 ): [number, number, number, number] {
+  const { originalWidth, originalHeight } = processedImageData
+
+  const xRatio = originalWidth / 640  // MODEL_WIDTH
+  const yRatio = originalHeight / 640  // MODEL_HEIGHT
+
   // Convert center coordinates to corner coordinates
-  const x1 = xCenter - width / 2
-  const y1 = yCenter - height / 2
-  const x2 = xCenter + width / 2
-  const y2 = yCenter + height / 2
+  const x1 = (xCenter - width / 2) * xRatio
+  const y1 = (yCenter - height / 2) * yRatio
+  const x2 = (xCenter + width / 2) * xRatio
+  const y2 = (yCenter + height / 2) * yRatio
 
-  // Scale from model coordinates to original image coordinates
-  const scaledX1 = Math.max(0, (x1 / MODEL_WIDTH) * originalWidth)
-  const scaledY1 = Math.max(0, (y1 / MODEL_HEIGHT) * originalHeight)
-  const scaledX2 = Math.min(originalWidth, (x2 / MODEL_WIDTH) * originalWidth)
-  const scaledY2 = Math.min(originalHeight, (y2 / MODEL_HEIGHT) * originalHeight)
+  // Clamp to image bounds
+  const clampedX1 = Math.max(0, x1)
+  const clampedY1 = Math.max(0, y1)
+  const clampedX2 = Math.min(originalWidth, x2)
+  const clampedY2 = Math.min(originalHeight, y2)
 
-  const boxWidth = scaledX2 - scaledX1
-  const boxHeight = scaledY2 - scaledY1
+  const boxWidth = clampedX2 - clampedX1
+  const boxHeight = clampedY2 - clampedY1
 
-  return [scaledX1, scaledY1, boxWidth, boxHeight]
+  return [clampedX1, clampedY1, boxWidth, boxHeight]
 }
 
 /**
@@ -183,9 +185,8 @@ export function processDetections(
 
 
     // Convert to original image coordinates
-    const { originalWidth, originalHeight } = processedImageData
     const [scaledX1, scaledY1, boxWidth, boxHeight] = convertToImageCoordinates(
-      xCenter, yCenter, width, height, originalWidth, originalHeight
+      xCenter, yCenter, width, height, processedImageData
     )
 
     // Skip boxes that are too small
@@ -230,7 +231,6 @@ export function processSegmentations(
   options: PostProcessOptions
 ): Segmentation[] {
   const { confidenceThreshold, iouThreshold, maxDetections } = options
-  const { originalWidth, originalHeight } = processedImageData
 
   // YOLO11-seg output format: [116, 8400] where first 84 are detection data and remaining 32 are mask coefficients
   const NUM_DETECTIONS = 8400
@@ -279,24 +279,10 @@ export function processSegmentations(
       maskCoeffs.push(output[(84 + j) * NUM_DETECTIONS + i] ?? 0)
     }
 
-    // Convert center coordinates to corner coordinates
-    const x1 = xCenter - width / 2
-    const y1 = yCenter - height / 2
-    const x2 = xCenter + width / 2
-    const y2 = yCenter + height / 2
-
-    // Scale from model coordinates (640x640) to original image coordinates
-    const modelWidth = MODEL_WIDTH
-    const modelHeight = MODEL_HEIGHT
-
-    const scaledX1 = Math.max(0, (x1 / modelWidth) * originalWidth)
-    const scaledY1 = Math.max(0, (y1 / modelHeight) * originalHeight)
-    const scaledX2 = Math.min(originalWidth, (x2 / modelWidth) * originalWidth)
-    const scaledY2 = Math.min(originalHeight, (y2 / modelHeight) * originalHeight)
-
-    // Skip boxes that are too small
-    const boxWidth = scaledX2 - scaledX1
-    const boxHeight = scaledY2 - scaledY1
+    // Convert to original image coordinates using the same function
+    const [scaledX1, scaledY1, boxWidth, boxHeight] = convertToImageCoordinates(
+      xCenter, yCenter, width, height, processedImageData
+    )
     if (boxWidth < 20 || boxHeight < 20) continue
 
     const className = COCO_CLASSES[bestClassId] ?? 'unknown'
@@ -324,6 +310,7 @@ export function processSegmentations(
     if (!detection) continue
 
     // Create a simple mask for now (this would need proper mask prototype processing in real implementation)
+    const { originalWidth, originalHeight } = processedImageData
     const maskWidth = originalWidth
     const maskHeight = originalHeight
     const maskData = new Uint8ClampedArray(maskWidth * maskHeight * 4)
@@ -373,7 +360,6 @@ export function processPoses(
   options: PostProcessOptions
 ): Pose[] {
   const { confidenceThreshold, iouThreshold, maxDetections } = options
-  const { originalWidth, originalHeight } = processedImageData
 
   // YOLO11-pose format: [56, 8400] -> channel-separated layout
   const NUM_DETECTIONS = 8400
@@ -407,12 +393,13 @@ export function processPoses(
       const keypointConf = output[(5 + j * 3 + 2) * NUM_DETECTIONS + i] ?? 0
 
       // Convert keypoints from model coordinates to original image coordinates
-      // Account for letterbox padding
-      const { scaleX, scaleY, padX, padY } = processedImageData
+      const { originalWidth, originalHeight } = processedImageData
+      const xRatio = originalWidth / 640  // MODEL_WIDTH
+      const yRatio = originalHeight / 640  // MODEL_HEIGHT
 
-      // Remove padding and scale back to original coordinates
-      const originalX = Math.max(0, (keypointX - padX) / scaleX)
-      const originalY = Math.max(0, (keypointY - padY) / scaleY)
+      // Simple ratio scaling
+      const originalX = Math.max(0, Math.min(originalWidth, keypointX * xRatio))
+      const originalY = Math.max(0, Math.min(originalHeight, keypointY * yRatio))
 
       keypoints.push({
         x: originalX,
@@ -422,21 +409,10 @@ export function processPoses(
       })
     }
 
-    // Convert center coordinates to corner coordinates
-    const x1 = xCenter - width / 2
-    const y1 = yCenter - height / 2
-    const x2 = xCenter + width / 2
-    const y2 = yCenter + height / 2
-
-    // Scale bbox to original image coordinates
-    const scaledX1 = Math.max(0, (x1 / 640) * originalWidth)
-    const scaledY1 = Math.max(0, (y1 / 640) * originalHeight)
-    const scaledX2 = Math.min(originalWidth, (x2 / 640) * originalWidth)
-    const scaledY2 = Math.min(originalHeight, (y2 / 640) * originalHeight)
-
-    // Skip boxes that are too small
-    const boxWidth = scaledX2 - scaledX1
-    const boxHeight = scaledY2 - scaledY1
+    // Convert bounding box to original image coordinates using the same function
+    const [scaledX1, scaledY1, boxWidth, boxHeight] = convertToImageCoordinates(
+      xCenter, yCenter, width, height, processedImageData
+    )
     if (boxWidth < 20 || boxHeight < 20) continue
 
     // Store for NMS

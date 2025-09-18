@@ -11,7 +11,9 @@ export interface DrawingOptions {
   lineWidth?: number
   fontSize?: string
   fontFamily?: string
-  colors?: string[]
+  colors?: readonly string[]
+  opacity?: number
+  labelBackgroundOpacity?: number
 }
 
 const DEFAULT_OPTIONS: Required<DrawingOptions> = {
@@ -20,13 +22,15 @@ const DEFAULT_OPTIONS: Required<DrawingOptions> = {
   lineWidth: 2,
   fontSize: '14px',
   fontFamily: 'Arial, sans-serif',
-  colors: DEFAULT_COLORS
+  colors: DEFAULT_COLORS,
+  opacity: 1.0,
+  labelBackgroundOpacity: 0.8
 }
 
 /**
  * Get color for a specific class ID
  */
-function getColorForClass(classId: number, colors: string[]): string {
+function getColorForClass(classId: number, colors: readonly string[]): string {
   return colors[classId % colors.length] ?? colors[0] ?? '#FF6B6B'
 }
 
@@ -67,11 +71,13 @@ function drawMirroredLabel(
     labelX = -(textWidth + 8)
   }
 
-  // Draw label background
+  // Draw label background with opacity
+  ctx.globalAlpha = opts.labelBackgroundOpacity
   ctx.fillStyle = color
   ctx.fillRect(labelX, labelY, textWidth + 8, textHeight + 4)
 
   // Draw label text
+  ctx.globalAlpha = 1.0
   ctx.fillStyle = 'white'
   ctx.fillText(label, labelX + 4, labelY + textHeight)
 
@@ -103,30 +109,31 @@ export function drawDetections(
 
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
-  // Calculate scale factors
+  // GitHub project style: coordinates are already in original image space
+  // Scale them to canvas dimensions
   const scaleX = canvas.width / sourceWidth
   const scaleY = canvas.height / sourceHeight
-
 
   // Clear canvas first
   clearCanvas(canvas)
 
   ctx.font = `${opts.fontSize} ${opts.fontFamily}`
   ctx.lineWidth = opts.lineWidth
+  ctx.globalAlpha = opts.opacity
 
   detections.forEach((detection) => {
     const [x, y, width, height] = detection.bbox
     const color = getColorForClass(detection.classIndex, opts.colors)
 
-    // Scale coordinates to canvas
-    const scaledX = x * scaleX
-    const scaledY = y * scaleY
-    const scaledWidth = width * scaleX
-    const scaledHeight = height * scaleY
+    // Scale coordinates from source image size to canvas size
+    const drawX = x * scaleX
+    const drawY = y * scaleY
+    const drawWidth = width * scaleX
+    const drawHeight = height * scaleY
 
     // Draw bounding box
     ctx.strokeStyle = color
-    ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight)
+    ctx.strokeRect(drawX, drawY, drawWidth, drawHeight)
 
     // Draw label if enabled
     if (opts.showLabels) {
@@ -134,9 +141,12 @@ export function drawDetections(
         ? `${detection.class} ${(detection.score * 100).toFixed(1)}%`
         : detection.class
 
-      drawMirroredLabel(ctx, canvas, label, scaledX, scaledY, scaledWidth, color, opts)
+      drawMirroredLabel(ctx, canvas, label, drawX, drawY, drawWidth, color, opts)
     }
   })
+
+  // Reset global alpha
+  ctx.globalAlpha = 1.0
 }
 
 /**
@@ -168,14 +178,14 @@ export function drawPoses(
 
     // Draw bounding box
     const [x, y, width, height] = pose.bbox
-    const scaledX = x * scaleX
-    const scaledY = y * scaleY
-    const scaledWidth = width * scaleX
-    const scaledHeight = height * scaleY
+    const drawX = x * scaleX
+    const drawY = y * scaleY
+    const drawWidth = width * scaleX
+    const drawHeight = height * scaleY
 
     ctx.strokeStyle = color
     ctx.lineWidth = opts.lineWidth
-    ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight)
+    ctx.strokeRect(drawX, drawY, drawWidth, drawHeight)
 
     // Draw skeleton connections
     ctx.strokeStyle = color
@@ -189,8 +199,12 @@ export function drawPoses(
       if (startPoint && endPoint &&
           startPoint.confidence > 0.5 && endPoint.confidence > 0.5) {
         ctx.beginPath()
-        ctx.moveTo(startPoint.x * scaleX, startPoint.y * scaleY)
-        ctx.lineTo(endPoint.x * scaleX, endPoint.y * scaleY)
+        const startX = startPoint.x * scaleX
+        const startY = startPoint.y * scaleY
+        const endX = endPoint.x * scaleX
+        const endY = endPoint.y * scaleY
+        ctx.moveTo(startX, startY)
+        ctx.lineTo(endX, endY)
         ctx.stroke()
       }
     })
@@ -198,19 +212,19 @@ export function drawPoses(
     // Draw keypoints
     pose.keypoints.forEach((keypoint, keypointIndex) => {
       if (keypoint.confidence > 0.5) {
-        const scaledX = keypoint.x * scaleX
-        const scaledY = keypoint.y * scaleY
+        const drawX = keypoint.x * scaleX
+        const drawY = keypoint.y * scaleY
 
         ctx.fillStyle = color
         ctx.beginPath()
-        ctx.arc(scaledX, scaledY, 4, 0, 2 * Math.PI)
+        ctx.arc(drawX, drawY, 4, 0, 2 * Math.PI)
         ctx.fill()
 
         // Draw keypoint index for debugging
         if (opts.showLabels) {
           ctx.fillStyle = 'white'
           ctx.font = '10px Arial'
-          ctx.fillText(keypointIndex.toString(), scaledX + 5, scaledY - 5)
+          ctx.fillText(keypointIndex.toString(), drawX + 5, drawY - 5)
         }
       }
     })
@@ -221,7 +235,7 @@ export function drawPoses(
         ? `${pose.class} ${(pose.score * 100).toFixed(1)}%`
         : pose.class
 
-      drawMirroredLabel(ctx, canvas, label, scaledX, scaledY, scaledWidth, color, opts)
+      drawMirroredLabel(ctx, canvas, label, drawX, drawY, drawWidth, color, opts)
     }
   })
 }
@@ -275,14 +289,14 @@ export function drawSegmentations(
 
     // Draw bounding box
     const [x, y, width, height] = segmentation.bbox
-    const scaledX = x * scaleX
-    const scaledY = y * scaleY
-    const scaledWidth = width * scaleX
-    const scaledHeight = height * scaleY
+    const drawX = x * scaleX
+    const drawY = y * scaleY
+    const drawWidth = width * scaleX
+    const drawHeight = height * scaleY
 
     ctx.strokeStyle = color
     ctx.lineWidth = opts.lineWidth
-    ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight)
+    ctx.strokeRect(drawX, drawY, drawWidth, drawHeight)
 
     // Draw label if enabled
     if (opts.showLabels) {
@@ -290,7 +304,7 @@ export function drawSegmentations(
         ? `${segmentation.class} ${(segmentation.score * 100).toFixed(1)}%`
         : segmentation.class
 
-      drawMirroredLabel(ctx, canvas, label, scaledX, scaledY, scaledWidth, color, opts)
+      drawMirroredLabel(ctx, canvas, label, drawX, drawY, drawWidth, color, opts)
     }
   })
 }

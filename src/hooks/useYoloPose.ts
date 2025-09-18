@@ -1,10 +1,10 @@
-import { useMemo, useCallback } from 'react'
-import type { YoloConfig, Pose, InferenceResult, DrawingOptions } from '@/types'
+import { useMemo, useCallback, useRef } from 'react'
+import type { YoloConfig, Pose, InferenceResult, AutoDrawConfig } from '@/types'
 import { useYolo } from './useYolo'
 import { drawPoses, clearCanvas } from '@/utils/drawing'
 
 export interface UseYoloPoseConfig extends Omit<YoloConfig, 'modelType'> {
-  // Pose-specific configurations can be added here
+  autoDraw?: AutoDrawConfig
 }
 
 export interface UseYoloPoseReturn {
@@ -14,21 +14,26 @@ export interface UseYoloPoseReturn {
   downloadProgress: number
   predict: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<InferenceResult>
   detectPoses: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<Pose[]>
-  drawPoses: (canvas: HTMLCanvasElement, poses: Pose[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => void
+  detectPosesAndDraw: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData, canvas: HTMLCanvasElement, sourceWidth: number, sourceHeight: number) => Promise<Pose[]>
+  drawPoses: (canvas: HTMLCanvasElement, poses: Pose[], sourceWidth: number, sourceHeight: number, options?: Partial<AutoDrawConfig>) => void
   clearCanvas: (canvas: HTMLCanvasElement) => void
   reset: () => void
 }
 
 /**
  * Specialized hook for YOLO pose estimation
- * Provides a focused interface for pose detection tasks
+ * Provides a focused interface for pose detection tasks with autoDraw support
  */
 export function useYoloPose(config: UseYoloPoseConfig = {}): UseYoloPoseReturn {
+  const { autoDraw, ...restConfig } = config
+  const autoDrawConfigRef = useRef<AutoDrawConfig | undefined>(autoDraw)
+  autoDrawConfigRef.current = autoDraw
+
   // Force pose model type
   const poseConfig: YoloConfig = useMemo(() => ({
-    ...config,
+    ...restConfig,
     modelType: 'pose' as const
-  }), [config])
+  }), [restConfig])
 
   const { predict, ...yoloState } = useYolo(poseConfig)
 
@@ -37,6 +42,11 @@ export function useYoloPose(config: UseYoloPoseConfig = {}): UseYoloPoseReturn {
     async (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData): Promise<Pose[]> => {
       const result: InferenceResult = await predict(input)
 
+      // Handle skipped frames gracefully
+      if (result.skipped) {
+        return []
+      }
+
       if (!result.poses) {
         throw new Error('No poses returned from model')
       }
@@ -44,9 +54,33 @@ export function useYoloPose(config: UseYoloPoseConfig = {}): UseYoloPoseReturn {
       return result.poses
     }, [predict])
 
+  // Combined detect poses and draw function
+  const detectPosesAndDraw = useCallback(
+    async (
+      input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData,
+      canvas: HTMLCanvasElement,
+      sourceWidth: number,
+      sourceHeight: number
+    ): Promise<Pose[]> => {
+      const poses = await detectPoses(input)
+      const drawConfig = autoDrawConfigRef.current
+
+      if (drawConfig?.enabled) {
+        if (drawConfig.clearPrevious !== false) {
+          clearCanvas(canvas)
+        }
+        drawPoses(canvas, poses, sourceWidth, sourceHeight, drawConfig)
+        drawConfig.onDrawComplete?.(canvas)
+      }
+
+      return poses
+    },
+    [detectPoses]
+  )
+
   // Drawing utilities
   const drawPosesCallback = useCallback(
-    (canvas: HTMLCanvasElement, poses: Pose[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => {
+    (canvas: HTMLCanvasElement, poses: Pose[], sourceWidth: number, sourceHeight: number, options?: Partial<AutoDrawConfig>) => {
       drawPoses(canvas, poses, sourceWidth, sourceHeight, options)
     }, []
   )
@@ -61,6 +95,7 @@ export function useYoloPose(config: UseYoloPoseConfig = {}): UseYoloPoseReturn {
     ...yoloState,
     predict,
     detectPoses,
+    detectPosesAndDraw,
     drawPoses: drawPosesCallback,
     clearCanvas: clearCanvasCallback
   }

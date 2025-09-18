@@ -3,7 +3,7 @@
  */
 
 import * as ort from 'onnxruntime-web'
-import type { YoloProvider, ProviderConfig } from '@/types'
+import type { YoloProvider } from '@/types'
 
 export interface InferenceSession {
   session: ort.InferenceSession
@@ -12,59 +12,46 @@ export interface InferenceSession {
 }
 
 /**
- * Configure ONNX Runtime providers
+ * Configure ONNX Runtime providers with proper WebGPU support and fallback
  */
-export function configureProviders(provider: YoloProvider): ProviderConfig[] {
-  const configs: ProviderConfig[] = []
-
+export function configureProviders(provider: YoloProvider): ort.InferenceSession.ExecutionProviderConfig[] {
   switch (provider) {
     case 'webgpu':
-      configs.push({
-        provider: 'webgpu',
-        options: {
-          preferredLayout: 'NCHW'
-        }
-      })
-      // Fallback to WASM
-      configs.push({
-        provider: 'wasm',
-        options: {
-          numThreads: 4
-        }
-      })
-      break
-      
+      // Try WebGPU first, then fallback to CPU
+      return ['webgpu', 'cpu']
+
     case 'wasm':
     default:
-      configs.push({
-        provider: 'wasm',
-        options: {
-          numThreads: 4
-        }
-      })
-      break
+      // Use CPU provider which is more stable than WASM for real-time processing
+      return ['cpu']
   }
-
-  return configs
 }
 
 /**
- * Create ONNX Runtime inference session
+ * Create ONNX Runtime inference session with WebGPU/WASM fallback
  */
 export async function createInferenceSession(
   modelPath: string,
-  _provider: YoloProvider = 'wasm',
-  onProgress?: (progress: number) => void
+  provider: YoloProvider = 'wasm',
+  onProgress?: (progress: number) => void,
+  numThreads?: number
 ): Promise<InferenceSession> {
   try {
-    // Configure ONNX Runtime to match working project
+    // Configure ONNX Runtime
     ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/'
-    ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4
+    ort.env.wasm.numThreads = numThreads ?? navigator.hardwareConcurrency ?? 4
+
+    const executionProviders = configureProviders(provider)
 
     const sessionOptions: ort.InferenceSession.SessionOptions = {
-      executionProviders: ['wasm'],
+      executionProviders,
       graphOptimizationLevel: 'all',
-      executionMode: 'parallel'
+      executionMode: 'parallel',
+      enableCpuMemArena: true,
+      enableMemPattern: true,
+      freeDimensionOverrides: {},
+      logSeverityLevel: 4, 
+      logVerbosityLevel: 0 
     }
 
     // Load model with progress tracking
@@ -72,6 +59,11 @@ export async function createInferenceSession(
 
     if (onProgress) {
       onProgress(100)
+    }
+
+    // Log which provider is actually being used
+    if (__DEV__) {
+      console.log('[YOLO] Session created successfully with provider:', provider)
     }
 
     return {
@@ -86,36 +78,80 @@ export async function createInferenceSession(
 }
 
 /**
- * Run inference on preprocessed data
+ * Simple mutex implementation for inference session
+ */
+class InferenceMutex {
+  private queue: Array<() => void> = []
+  private isLocked = false
+
+  async acquire(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.isLocked) {
+        this.isLocked = true
+        resolve()
+      } else {
+        this.queue.push(resolve)
+      }
+    })
+  }
+
+  release(): void {
+    const next = this.queue.shift()
+    if (next) {
+      next()
+    } else {
+      this.isLocked = false
+    }
+  }
+}
+
+// Global mutex map for each session
+const sessionMutexMap = new WeakMap<ort.InferenceSession, InferenceMutex>()
+
+/**
+ * Run inference on preprocessed data with proper mutex protection
  */
 export async function runInference(
   inferenceSession: InferenceSession,
   inputData: Float32Array,
   inputShape: number[]
 ): Promise<ort.InferenceSession.OnnxValueMapType> {
+  const { session, inputNames } = inferenceSession
+
+  // Get or create mutex for this session
+  let mutex = sessionMutexMap.get(session)
+  if (!mutex) {
+    mutex = new InferenceMutex()
+    sessionMutexMap.set(session, mutex)
+  }
+
+  // Acquire mutex before running inference
+  await mutex.acquire()
+
   try {
-    const { session, inputNames } = inferenceSession
-    
     // Create input tensor
     const inputTensor = new ort.Tensor('float32', inputData, inputShape)
-    
+
     // Create feeds object
     const feeds: Record<string, ort.Tensor> = {}
     feeds[inputNames[0] ?? 'input'] = inputTensor
-    
+
     // Run inference
     const startTime = performance.now()
     const results = await session.run(feeds)
     const endTime = performance.now()
-    
+
     if (__DEV__) {
       console.log(`Inference time: ${(endTime - startTime).toFixed(2)}ms`)
     }
-    
+
     return results
   } catch (error) {
     console.error('Inference failed:', error)
     throw new Error(`Inference failed: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    // Always release mutex
+    mutex.release()
   }
 }
 

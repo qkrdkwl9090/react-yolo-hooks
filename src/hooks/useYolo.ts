@@ -35,11 +35,16 @@ export function useYolo(config: YoloConfig = {}): UseYoloReturn {
   const {
     modelType = 'detection',
     modelUrl,
+    customModel,
     confidenceThreshold = DEFAULT_CONFIG.confidenceThreshold,
     iouThreshold = DEFAULT_CONFIG.iouThreshold,
     maxDetections = DEFAULT_CONFIG.maxDetections,
     provider,
-    enableDebug = DEFAULT_CONFIG.enableDebug
+    numThreads,
+    enableDebug = DEFAULT_CONFIG.enableDebug,
+    autoSelectProvider = true,
+    maxFPS = DEFAULT_CONFIG.maxFPS,
+    skipFrames = DEFAULT_CONFIG.skipFrames
   } = config
 
   // State management
@@ -54,9 +59,17 @@ export function useYolo(config: YoloConfig = {}): UseYoloReturn {
   // Refs for cleanup and persistence
   const inferenceSessionRef = useRef<InferenceSession | null>(null)
   const mountedRef = useRef<boolean>(true)
+  const predictionInProgressRef = useRef<boolean>(false)
+  const lastPredictionTimeRef = useRef<number>(0)
+  const frameCountRef = useRef<number>(0)
 
   // Get model configuration
   const getModelConfig = useCallback((): YoloModel => {
+    // Use custom model if provided
+    if (customModel) {
+      return customModel
+    }
+
     const baseModel = DEFAULT_MODELS[modelType]
     if (!baseModel) {
       throw new Error(`Unsupported model type: ${modelType}`)
@@ -70,7 +83,7 @@ export function useYolo(config: YoloConfig = {}): UseYoloReturn {
       }
     }
     return baseModel
-  }, [modelType, modelUrl])
+  }, [modelType, modelUrl, customModel])
 
   // Initialize model
   const initializeModel = useCallback(async () => {
@@ -88,7 +101,7 @@ export function useYolo(config: YoloConfig = {}): UseYoloReturn {
 
     try {
       // Determine optimal provider if not specified
-      const finalProvider = provider ?? await getOptimalProvider()
+      const finalProvider = provider ?? (autoSelectProvider ? await getOptimalProvider() : 'wasm')
 
       if (enableDebug) {
         console.log(`[YOLO] Loading ${modelType} model:`, modelConfig.name)
@@ -102,7 +115,8 @@ export function useYolo(config: YoloConfig = {}): UseYoloReturn {
         (progress: number) => {
           if (!mountedRef.current) return
           setState(prev => ({ ...prev, downloadProgress: progress }))
-        }
+        },
+        numThreads
       )
 
       // Store session reference
@@ -139,7 +153,54 @@ export function useYolo(config: YoloConfig = {}): UseYoloReturn {
   const predict = useCallback(async (
     input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData
   ): Promise<InferenceResult> => {
-    const startTime = performance.now()
+    const currentTime = performance.now()
+
+    // FPS limiting
+    if (maxFPS > 0) {
+      const minInterval = 1000 / maxFPS
+      const timeSinceLastPrediction = currentTime - lastPredictionTimeRef.current
+
+      if (timeSinceLastPrediction < minInterval) {
+        // Return a special skip result instead of throwing error
+        return {
+          inferenceTime: 0,
+          preprocessTime: 0,
+          postprocessTime: 0,
+          skipped: true
+        } as InferenceResult
+      }
+    }
+
+    // Frame skipping
+    if (skipFrames > 0) {
+      frameCountRef.current++
+      if (frameCountRef.current % (skipFrames + 1) !== 0) {
+        // Return a special skip result instead of throwing error
+        return {
+          inferenceTime: 0,
+          preprocessTime: 0,
+          postprocessTime: 0,
+          skipped: true
+        } as InferenceResult
+      }
+    }
+
+    // Check if prediction is already in progress - skip this frame
+    if (predictionInProgressRef.current) {
+      if (enableDebug) {
+        console.log('[YOLO] Prediction already in progress, skipping frame')
+      }
+      // Return skip result for smooth continuous processing
+      return {
+        inferenceTime: 0,
+        preprocessTime: 0,
+        postprocessTime: 0,
+        skipped: true
+      } as InferenceResult
+    }
+
+    const startTime = currentTime
+    lastPredictionTimeRef.current = currentTime
 
     if (!inferenceSessionRef.current) {
       throw new Error('Model not initialized. Please wait for model to load.')
@@ -149,8 +210,12 @@ export function useYolo(config: YoloConfig = {}): UseYoloReturn {
       throw new Error('Model not ready. Please wait for model to load.')
     }
 
+    // Mark prediction as in progress
+    predictionInProgressRef.current = true
+
     const modelConfig = state.modelInfo
     if (!modelConfig) {
+      predictionInProgressRef.current = false
       throw new Error('Model configuration not available')
     }
 
@@ -289,8 +354,14 @@ export function useYolo(config: YoloConfig = {}): UseYoloReturn {
         console.log(`  Postprocessing: ${finalResult.postprocessTime.toFixed(2)}ms`)
       }
 
+      // Reset prediction in progress flag
+      predictionInProgressRef.current = false
+
       return finalResult
     } catch (error) {
+      // Always reset prediction in progress flag on error
+      predictionInProgressRef.current = false
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown prediction error'
       console.error('[YOLO] Prediction failed:', errorMessage)
       throw new Error(`Prediction failed: ${errorMessage}`)
@@ -304,6 +375,11 @@ export function useYolo(config: YoloConfig = {}): UseYoloReturn {
       disposeSession(inferenceSessionRef.current)
       inferenceSessionRef.current = null
     }
+
+    // Reset prediction in progress flag and timing
+    predictionInProgressRef.current = false
+    lastPredictionTimeRef.current = 0
+    frameCountRef.current = 0
 
     // Reset state
     setState({

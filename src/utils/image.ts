@@ -21,8 +21,12 @@ export interface ProcessedImageData {
   padY: number
 }
 
+// Reusable canvas for performance optimization
+let reuseCanvas: HTMLCanvasElement | null = null
+let reuseCtx: CanvasRenderingContext2D | null = null
+
 /**
- * Convert various input types to ImageData
+ * Convert various input types to ImageData with optimized canvas reuse
  */
 export function toImageData(
   input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData
@@ -31,28 +35,45 @@ export function toImageData(
     return input
   }
 
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    throw new Error('Failed to create canvas context')
+  // Get or create reusable canvas
+  if (!reuseCanvas || !reuseCtx) {
+    reuseCanvas = document.createElement('canvas')
+    reuseCtx = reuseCanvas.getContext('2d')
+    if (!reuseCtx) {
+      throw new Error('Failed to create canvas context')
+    }
+    // Optimize canvas for better performance
+    reuseCtx.imageSmoothingEnabled = false // Disable antialiasing for speed
   }
+
+  let width: number, height: number
 
   if (input instanceof HTMLImageElement) {
-    canvas.width = input.naturalWidth
-    canvas.height = input.naturalHeight
-    ctx.drawImage(input, 0, 0)
+    width = input.naturalWidth
+    height = input.naturalHeight
   } else if (input instanceof HTMLVideoElement) {
-    canvas.width = input.videoWidth
-    canvas.height = input.videoHeight
-    ctx.drawImage(input, 0, 0)
+    width = input.videoWidth
+    height = input.videoHeight
   } else if (input instanceof HTMLCanvasElement) {
-    canvas.width = input.width
-    canvas.height = input.height
-    ctx.drawImage(input, 0, 0)
+    width = input.width
+    height = input.height
+  } else {
+    throw new Error('Unsupported input type')
   }
 
-  return ctx.getImageData(0, 0, canvas.width, canvas.height)
+  // Resize canvas only if necessary
+  if (reuseCanvas.width !== width || reuseCanvas.height !== height) {
+    reuseCanvas.width = width
+    reuseCanvas.height = height
+  }
+
+  // Clear and draw
+  reuseCtx.clearRect(0, 0, width, height)
+  reuseCtx.drawImage(input as CanvasImageSource, 0, 0)
+
+  return reuseCtx.getImageData(0, 0, width, height)
 }
+
 
 /**
  * Preprocess image for YOLO inference with letterboxing
@@ -64,69 +85,46 @@ export function preprocessImage(
   const {
     targetWidth = 640,
     targetHeight = 640,
-    normalize = true,
-    letterbox = true
+    normalize = true
   } = options
 
   const { width: originalWidth, height: originalHeight, data } = imageData
 
   // Calculate scaling factors
-  let scaleX: number
-  let scaleY: number
-  let padX = 0
-  let padY = 0
+  const xRatio = originalWidth / targetWidth
+  const yRatio = originalHeight / targetHeight
 
-  if (letterbox) {
-    // Letterbox scaling - maintain aspect ratio
-    const scale = Math.min(targetWidth / originalWidth, targetHeight / originalHeight)
-    scaleX = scaleY = scale
-    
-    const scaledWidth = originalWidth * scale
-    const scaledHeight = originalHeight * scale
-    
-    padX = (targetWidth - scaledWidth) / 2
-    padY = (targetHeight - scaledHeight) / 2
-  } else {
-    // Stretch to fit
-    scaleX = targetWidth / originalWidth
-    scaleY = targetHeight / originalHeight
-  }
-
-  // Create output array
+  // Create output array with standard YOLO size
   const outputData = new Float32Array(3 * targetWidth * targetHeight)
-  
-  // Fill with background color (gray: 114/255)
-  outputData.fill(normalize ? 114 / 255 : 114)
+  const targetSize = targetWidth * targetHeight
 
   // Process pixels
   for (let y = 0; y < targetHeight; y++) {
     for (let x = 0; x < targetWidth; x++) {
-      // Calculate source coordinates
-      const srcX = Math.floor((x - padX) / scaleX)
-      const srcY = Math.floor((y - padY) / scaleY)
+      // Map back to original coordinates
+      const srcX = Math.floor(x * xRatio)
+      const srcY = Math.floor(y * yRatio)
 
-      // Skip if outside source bounds
-      if (srcX < 0 || srcX >= originalWidth || srcY < 0 || srcY >= originalHeight) {
-        continue
-      }
+      // Check bounds
+      if (srcX < originalWidth && srcY < originalHeight && srcX >= 0 && srcY >= 0) {
+        const srcIdx = (srcY * originalWidth + srcX) * 4
+        const dstIdx = y * targetWidth + x
 
-      const srcIdx = (srcY * originalWidth + srcX) * 4
-      const dstIdx = y * targetWidth + x
+        // Extract RGB values
+        const r = data[srcIdx] ?? 0
+        const g = data[srcIdx + 1] ?? 0
+        const b = data[srcIdx + 2] ?? 0
 
-      // Extract RGB values and convert to CHW format
-      const r = data[srcIdx] ?? 0
-      const g = data[srcIdx + 1] ?? 0
-      const b = data[srcIdx + 2] ?? 0
-
-      if (normalize) {
-        // Normalize to [0, 1]
-        outputData[dstIdx] = r / 255 // R channel
-        outputData[targetWidth * targetHeight + dstIdx] = g / 255 // G channel
-        outputData[2 * targetWidth * targetHeight + dstIdx] = b / 255 // B channel
-      } else {
-        outputData[dstIdx] = r
-        outputData[targetWidth * targetHeight + dstIdx] = g
-        outputData[2 * targetWidth * targetHeight + dstIdx] = b
+        // Normalize and store in CHW format
+        if (normalize) {
+          outputData[dstIdx] = r / 255 // R channel
+          outputData[targetSize + dstIdx] = g / 255 // G channel
+          outputData[targetSize * 2 + dstIdx] = b / 255 // B channel
+        } else {
+          outputData[dstIdx] = r
+          outputData[targetSize + dstIdx] = g
+          outputData[targetSize * 2 + dstIdx] = b
+        }
       }
     }
   }
@@ -137,10 +135,10 @@ export function preprocessImage(
     originalHeight,
     processedWidth: targetWidth,
     processedHeight: targetHeight,
-    scaleX,
-    scaleY,
-    padX,
-    padY
+    scaleX: targetWidth / originalWidth, 
+    scaleY: targetHeight / originalHeight,
+    padX: 0,
+    padY: 0
   }
 }
 

@@ -14,3 +14,6 @@ export type { UseYoloSegmentationConfig, UseYoloSegmentationReturn } from './use
 
 export { useYoloPose } from './useYoloPose'
 export type { UseYoloPoseConfig, UseYoloPoseReturn } from './useYoloPose'
+
+export { useYoloContinuous } from './useYoloContinuous'
+export type { UseYoloContinuousConfig, UseYoloContinuousReturn } from './useYoloContinuous'

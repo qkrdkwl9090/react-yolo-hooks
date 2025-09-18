@@ -3,8 +3,10 @@ export interface YoloModel {
   url: string
   inputShape: [number, number, number, number] // [batch, channels, height, width]
   outputShape: number[]
-  classes: string[]
+  classes: readonly string[]
   type: 'detection' | 'segmentation' | 'pose'
+  version?: string
+  description?: string
 }
 
 export interface Detection {
@@ -32,12 +34,16 @@ export interface Keypoint {
 export interface YoloConfig {
   modelType?: 'detection' | 'segmentation' | 'pose'
   modelUrl?: string
+  customModel?: YoloModel
   confidenceThreshold?: number
   iouThreshold?: number
   maxDetections?: number
-  provider?: 'webgpu' | 'wasm'
+  provider?: YoloProvider
   numThreads?: number
   enableDebug?: boolean
+  autoSelectProvider?: boolean
+  maxFPS?: number
+  skipFrames?: number
 }
 
 export interface YoloState {
@@ -67,6 +73,7 @@ export interface InferenceResult {
   inferenceTime: number
   preprocessTime: number
   postprocessTime: number
+  skipped?: boolean
 }
 
 export interface DrawingOptions {
@@ -75,7 +82,15 @@ export interface DrawingOptions {
   lineWidth?: number
   fontSize?: string
   fontFamily?: string
-  colors?: string[]
+  colors?: readonly string[]
+  opacity?: number
+  labelBackgroundOpacity?: number
+}
+
+export interface AutoDrawConfig extends DrawingOptions {
+  enabled: boolean
+  clearPrevious?: boolean
+  onDrawComplete?: (canvas: HTMLCanvasElement) => void
 }
 
 export interface UseYoloReturn extends YoloState {

@@ -1,10 +1,10 @@
-import { useMemo, useCallback } from 'react'
-import type { YoloConfig, Detection, InferenceResult, DrawingOptions } from '@/types'
+import { useMemo, useCallback, useRef } from 'react'
+import type { YoloConfig, Detection, InferenceResult, AutoDrawConfig } from '@/types'
 import { useYolo } from './useYolo'
 import { drawDetections, clearCanvas } from '@/utils/drawing'
 
 export interface UseYoloDetectionConfig extends Omit<YoloConfig, 'modelType'> {
-  // Detection-specific configurations can be added here
+  autoDraw?: AutoDrawConfig
 }
 
 export interface UseYoloDetectionReturn {
@@ -14,21 +14,26 @@ export interface UseYoloDetectionReturn {
   downloadProgress: number
   predict: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<InferenceResult>
   detect: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData) => Promise<Detection[]>
-  drawDetections: (canvas: HTMLCanvasElement, detections: Detection[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => void
+  detectAndDraw: (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData, canvas: HTMLCanvasElement, sourceWidth: number, sourceHeight: number) => Promise<Detection[]>
+  drawDetections: (canvas: HTMLCanvasElement, detections: Detection[], sourceWidth: number, sourceHeight: number, options?: Partial<AutoDrawConfig>) => void
   clearCanvas: (canvas: HTMLCanvasElement) => void
   reset: () => void
 }
 
 /**
  * Specialized hook for YOLO object detection
- * Provides a focused interface for detection tasks
+ * Provides a focused interface for detection tasks with autoDraw support
  */
 export function useYoloDetection(config: UseYoloDetectionConfig = {}): UseYoloDetectionReturn {
+  const { autoDraw, ...restConfig } = config
+  const autoDrawConfigRef = useRef<AutoDrawConfig | undefined>(autoDraw)
+  autoDrawConfigRef.current = autoDraw
+
   // Force detection model type
   const detectionConfig: YoloConfig = useMemo(() => ({
-    ...config,
+    ...restConfig,
     modelType: 'detection' as const
-  }), [config])
+  }), [restConfig])
 
   const { predict, ...yoloState } = useYolo(detectionConfig)
 
@@ -37,6 +42,11 @@ export function useYoloDetection(config: UseYoloDetectionConfig = {}): UseYoloDe
     async (input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData): Promise<Detection[]> => {
       const result: InferenceResult = await predict(input)
 
+      // Handle skipped frames gracefully
+      if (result.skipped) {
+        return []
+      }
+
       if (!result.detections) {
         throw new Error('No detections returned from model')
       }
@@ -44,9 +54,33 @@ export function useYoloDetection(config: UseYoloDetectionConfig = {}): UseYoloDe
       return result.detections
     }, [predict])
 
+  // Combined detect and draw function
+  const detectAndDraw = useCallback(
+    async (
+      input: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | ImageData,
+      canvas: HTMLCanvasElement,
+      sourceWidth: number,
+      sourceHeight: number
+    ): Promise<Detection[]> => {
+      const detections = await detect(input)
+      const drawConfig = autoDrawConfigRef.current
+
+      if (drawConfig?.enabled) {
+        if (drawConfig.clearPrevious !== false) {
+          clearCanvas(canvas)
+        }
+        drawDetections(canvas, detections, sourceWidth, sourceHeight, drawConfig)
+        drawConfig.onDrawComplete?.(canvas)
+      }
+
+      return detections
+    },
+    [detect]
+  )
+
   // Drawing utilities
   const drawDetectionsCallback = useCallback(
-    (canvas: HTMLCanvasElement, detections: Detection[], sourceWidth: number, sourceHeight: number, options?: DrawingOptions) => {
+    (canvas: HTMLCanvasElement, detections: Detection[], sourceWidth: number, sourceHeight: number, options?: Partial<AutoDrawConfig>) => {
       drawDetections(canvas, detections, sourceWidth, sourceHeight, options)
     }, []
   )
@@ -61,6 +95,7 @@ export function useYoloDetection(config: UseYoloDetectionConfig = {}): UseYoloDe
     ...yoloState,
     predict,
     detect,
+    detectAndDraw,
     drawDetections: drawDetectionsCallback,
     clearCanvas: clearCanvasCallback
   }
